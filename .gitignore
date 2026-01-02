@@ -2,3 +2,6 @@ papers
 date_test_model
 licenta.docx
 licenta.pdf
+.gitignore
+.DS_Store
+.idea
