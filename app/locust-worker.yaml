@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: locust-worker
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: locust-worker
+  template:
+    metadata:
+      labels:
+        app: locust-worker
+    spec:
+      containers:
+      - name: locust-worker
+        image: locustio/locust
+        args: ["-f", "/mnt/locust/locustfile.py", "--worker", "--master-host=locust-master"]
+        env:
+        - name: TARGET_HOST
+          value: "http://nginx-service.default.svc.cluster.local"
+        volumeMounts:
+        - name: locustfile-volume
+          mountPath: /mnt/locust
+      volumes:
+      - name: locustfile-volume
+        configMap:
+          name: locustfile-config

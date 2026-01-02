@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: locust-master
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: locust-master
+  template:
+    metadata:
+      labels:
+        app: locust-master
+    spec:
+      containers:
+      - name: locust-master
+        image: locustio/locust
+        args: ["-f", "/mnt/locust/locustfile.py", "--master"]
+        ports:
+        - containerPort: 8089
+        - containerPort: 5557
+        - containerPort: 5558
+        env:
+        - name: TARGET_HOST
+          value: "http://nginx-service.default.svc.cluster.local"
+        volumeMounts:
+        - name: locustfile-volume
+          mountPath: /mnt/locust
+      volumes:
+      - name: locustfile-volume
+        configMap:
+          name: locustfile-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: locust-master
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 8089
+    targetPort: 8089
+    name: web
+  - port: 5557
+    targetPort: 5557
+    name: master-p1
+  - port: 5558
+    targetPort: 5558
+    name: master-p2
+  selector:
+    app: locust-master
