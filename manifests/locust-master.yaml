@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: locust-master
-        image: locustio/locust
+        image: fabian1207/locust
         args: ["-f", "/mnt/locust/locustfile.py", "--master"]
         ports:
         - containerPort: 8089
@@ -22,7 +22,7 @@ spec:
         - containerPort: 5558
         env:
         - name: TARGET_HOST
-          value: "http://nginx-service.default.svc.cluster.local"
+          value: "http://api-service.default.svc.cluster.local"
         volumeMounts:
         - name: locustfile-volume
           mountPath: /mnt/locust

@@ -14,11 +14,11 @@ spec:
     spec:
       containers:
       - name: locust-worker
-        image: locustio/locust
+        image: fabian1207/locust
         args: ["-f", "/mnt/locust/locustfile.py", "--worker", "--master-host=locust-master"]
         env:
         - name: TARGET_HOST
-          value: "http://nginx-service.default.svc.cluster.local"
+          value: "http://api-service.default.svc.cluster.local"
         volumeMounts:
         - name: locustfile-volume
           mountPath: /mnt/locust
