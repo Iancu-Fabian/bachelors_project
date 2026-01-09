@@ -11,11 +11,11 @@ echo "Recreating cluster from $CONFIG_FILE..."
 eksctl create cluster -f $CONFIG_FILE
 
 echo "Applying manifests..."
-if [ -d "app" ]; then
-  kubectl apply -f app/
+if [ -d "manifests" ]; then
+  kubectl apply -f manifests/
   echo "App redeployed."
 else
-  echo "No ./app directory found — skipping app deployment."
+  echo "No ./manifests directory found — skipping app deployment."
 fi
 
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts

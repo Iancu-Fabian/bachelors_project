@@ -1,20 +1,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nginx-deployment
+  name: api-deployment
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: nginx
+      app: api
   template:
     metadata:
       labels:
-        app: nginx
+        app: api
     spec:
       containers:
-      - name: nginx
-        image: nginx
+      - name: api
+        image: fabian1207/inference-api-bachelors:latest
         ports:
         - containerPort: 80
         resources:
@@ -22,15 +22,5 @@ spec:
             cpu: 100m
           limits:
             cpu: 500m
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: nginx-service
-spec:
-  type: LoadBalancer
-  selector:
-    app: nginx
-  ports:
-    - port: 80
-      targetPort: 80
+
+
