@@ -13,4 +13,5 @@ COPY data ./data
 
 EXPOSE 8089
 
-CMD ["locust", "-f", "locustfile.py"]
+ENTRYPOINT ["locust"]
+CMD ["-f", "locustfile.py"]

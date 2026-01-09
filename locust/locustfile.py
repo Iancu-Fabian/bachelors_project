@@ -1,5 +1,6 @@
 import json
 import random
+import os
 from locust import HttpUser, task, between
 
 with open("data/texts.json", "r") as f:
@@ -7,6 +8,11 @@ with open("data/texts.json", "r") as f:
 
 class SentimentUser(HttpUser):
     wait_time = between(1, 3)
+
+    host = os.getenv(
+        "TARGET_HOST",
+        "http://localhost:8000"
+    )
 
     @task
     def predict_sentiment(self):
