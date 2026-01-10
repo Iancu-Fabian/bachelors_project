@@ -19,10 +19,4 @@ spec:
         env:
         - name: TARGET_HOST
           value: "http://api-service.default.svc.cluster.local"
-        volumeMounts:
-        - name: locustfile-volume
-          mountPath: /mnt/locust
-      volumes:
-      - name: locustfile-volume
-        configMap:
-          name: locustfile-config
+        
