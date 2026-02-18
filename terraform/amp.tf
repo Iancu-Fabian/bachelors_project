@@ -14,6 +14,14 @@ resource "kubernetes_namespace_v1" "monitoring" {
   ]
 }
 
+resource "aws_prometheus_workspace" "this" {
+  alias = var.amp_workspace_alias
+
+  tags = {
+    Project = var.project_name
+  }
+}
+
 resource "helm_release" "prometheus" {
   name       = "kube-prometheus-stack"
   namespace  = kubernetes_namespace_v1.monitoring.metadata[0].name
@@ -30,15 +38,13 @@ resource "helm_release" "prometheus" {
         }
 
         prometheusSpec = {
-          replicas = 1
+          enableAdminAPI = false
 
-          retention = "1h"
-          enableFeatures = [
-            "agent"
-          ]
+          retention   = "0s"
+          storageSpec = {}
 
-
-          storageSpec = null
+          walCompression = false
+          mode           = "agent"
 
           remoteWrite = [
             {
@@ -51,6 +57,8 @@ resource "helm_release" "prometheus" {
         }
       }
 
+
+
       grafana = {
         enabled = false
       }
@@ -62,10 +70,3 @@ resource "helm_release" "prometheus" {
   ]
 }
 
-resource "aws_prometheus_workspace" "this" {
-  alias = var.amp_workspace_alias
-
-  tags = {
-    Project = var.project_name
-  }
-}

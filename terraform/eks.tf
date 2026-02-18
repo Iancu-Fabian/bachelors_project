@@ -5,8 +5,10 @@ module "eks" {
   cluster_name    = var.cluster_name
   cluster_version = "1.29"
 
-  cluster_endpoint_public_access  = true
-  cluster_endpoint_private_access = true
+  enable_irsa                              = var.enable_irsa
+  cluster_endpoint_public_access           = true
+  cluster_endpoint_private_access          = true
+  enable_cluster_creator_admin_permissions = true
 
   cluster_endpoint_public_access_cidrs = [
     "86.123.38.115/32"
@@ -24,3 +26,4 @@ module "eks" {
     }
   }
 }
+
