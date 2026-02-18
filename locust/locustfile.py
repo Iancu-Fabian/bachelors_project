@@ -11,7 +11,6 @@ with open("data/texts.json", "r") as f:
     SAMPLE_TEXTS = json.load(f)
 
 class SentimentUser(HttpUser):
-    wait_time = between(1, 3)
 
     host = os.getenv("TARGET_HOST")
 
