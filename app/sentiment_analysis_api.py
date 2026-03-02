@@ -86,3 +86,6 @@ def root():
       </body>
     </html>
     """
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
