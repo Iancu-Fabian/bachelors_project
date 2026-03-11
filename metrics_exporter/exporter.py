@@ -5,9 +5,22 @@ import datetime
 from requests_aws4auth import AWS4Auth
 import os
 
+CSV_PATH = "dataset/training_dataset.csv"
+
+def get_amp_endpoint(region: str, alias: str = "licenta-amp") -> str:
+    client = boto3.client("amp", region_name=region)
+    workspaces = client.list_workspaces(alias=alias)["workspaces"]
+    
+    if not workspaces:
+        raise RuntimeError(f"No AMP workspace found with alias '{alias}'")
+    
+    workspace = workspaces[0]
+    return f"https://aps-workspaces.{region}.amazonaws.com/workspaces/{workspace['workspaceId']}"
+
+
 REGION = "us-east-1"
-AMP_ENDPOINT = "https://aps-workspaces.us-east-1.amazonaws.com/workspaces/ws-40558f89-8512-4916-a67f-117fb51ca37d"
-NAMESPACE = "default" 
+AMP_ENDPOINT = get_amp_endpoint(REGION)
+NAMESPACE = "default"
 DEPLOYMENT_NAME = "api-deployment"
 
 session = boto3.Session()
@@ -21,14 +34,17 @@ awsauth = AWS4Auth(
 )
 
 QUERIES = {
-    "request_rate": f'sum(rate(http_requests_total{{namespace="{NAMESPACE}"}}[1m])) OR on() vector(0)',
-    "cpu_usage": f'sum(rate(container_cpu_usage_seconds_total{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}.*"}}[1m]))',
-    "memory_usage": f'sum(container_memory_working_set_bytes{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}.*"}})',
-    "cpu_throttling_ratio": f'(sum(rate(container_cpu_cfs_throttled_seconds_total{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}.*"}}[1m])) / sum(rate(container_cpu_usage_seconds_total{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}.*"}}[1m]))) OR on() vector(0)',
-    "network_receive_rate": f'sum(rate(container_network_receive_bytes_total{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}.*"}}[1m])) OR on() vector(0)',
-    "latency_p95": f'histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}.*"}}[1m])) by (le)) OR on() vector(0)',
-    "error_rate": f'sum(rate(http_requests_total{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}.*", status=~"5.."}}[1m])) OR on() vector(0)',
-    "replica_count": f'kube_deployment_status_replicas_available{{namespace="{NAMESPACE}", deployment="{DEPLOYMENT_NAME}"}} OR on() vector(0)'
+    "request_rate":        f'sum(rate(http_requests_total{{handler="/predict"}}[1m])) OR on() vector(0)',
+    "cpu_usage":           f'sum(rate(container_cpu_usage_seconds_total{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}.*", container="api"}}[1m]))',
+    "memory_usage":        f'sum(container_memory_working_set_bytes{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}.*", container="api"}})',
+    "cpu_throttling_ratio":f'(sum(rate(container_cpu_cfs_throttled_seconds_total{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}.*", container="api"}}[1m])) / sum(rate(container_cpu_usage_seconds_total{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}.*", container="api"}}[1m]))) OR on() vector(0)',
+    "latency_p95": (
+                            f'histogram_quantile(0.95, sum(rate(http_request_duration_highr_seconds_bucket[1m])) by (le)) '
+                            f'* on() (sum(rate(http_requests_total{{handler="/predict"}}[1m])) > bool 0) '
+                            f'OR on() vector(0)'
+    ), 
+    "error_rate":          f'sum(rate(http_requests_total{{handler="/predict", status="5xx"}}[1m])) OR on() vector(0)',
+    "replica_count":       f'kube_deployment_status_replicas_available{{namespace="{NAMESPACE}", deployment="{DEPLOYMENT_NAME}"}} OR on() vector(0)'
 }
 
 def query_range(query, start, end, step="30s"):
@@ -45,8 +61,9 @@ def query_range(query, start, end, step="30s"):
         print(f"Error querying Prometheus: {e}")
         return None
 
+
 end_time = datetime.datetime.now(datetime.UTC)
-start_time = end_time - datetime.timedelta(minutes=30)
+start_time = end_time - datetime.timedelta(minutes=5)
 
 start = start_time.timestamp()
 end = end_time.timestamp()
@@ -68,7 +85,18 @@ for name, query in QUERIES.items():
 
 if dfs:
     final_df = pd.concat(dfs, axis=1).sort_index().interpolate().fillna(0)
-    final_df.to_csv("dataset/training_dataset.csv", mode='a', header=not os.path.exists("dataset/training_dataset.csv"))
-    print(f"Dataset saved with {len(final_df)} rows.")
+
+    if "replica_count" in final_df.columns:
+        final_df["replica_count"] = final_df["replica_count"].replace(0, pd.NA).ffill().fillna(0)
+
+    os.makedirs("dataset", exist_ok=True)
+
+    if os.path.exists(CSV_PATH) and os.path.getsize(CSV_PATH) > 0:
+        existing_df = pd.read_csv(CSV_PATH, index_col=0)
+        final_df = pd.concat([existing_df, final_df])
+        final_df = final_df[~final_df.index.duplicated(keep='last')]
+
+    final_df.to_csv(CSV_PATH)
+    print(f"Dataset saved with {len(final_df)} total rows.")
 else:
     print("No data collected at all. Check your AMP permissions or pod labels.")
