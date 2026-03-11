@@ -7,6 +7,8 @@ LOAD_PATTERN = os.getenv("LOAD_PATTERN", "constant")
 MAX_USERS = int(os.getenv("MAX_USERS", 50))
 SPAWN_RATE = int(os.getenv("SPAWN_RATE", 5))
 
+print("TARGET_HOST =", os.getenv("TARGET_HOST"))
+
 with open("data/texts.json", "r") as f:
     SAMPLE_TEXTS = json.load(f)
 
