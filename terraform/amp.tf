@@ -39,7 +39,7 @@ resource "helm_release" "prometheus" {
 
         prometheusSpec = {
           enableAdminAPI = false
-
+          scrapeInterval = "30s"
           retention   = "0s"
           storageSpec = {}
 
