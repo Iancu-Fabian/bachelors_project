@@ -4,8 +4,11 @@ import time
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from fastapi.responses import HTMLResponse
+from prometheus_fastapi_instrumentator import Instrumentator
 
 app = FastAPI(title="Sentiment Analysis API")
+
+Instrumentator().instrument(app).expose(app)  
 
 class SentimentRequest(BaseModel):
     text: str
@@ -20,8 +23,8 @@ class SentimentResponse(BaseModel):
 MODEL_NAME = "DGurgurov/xlm-r_romanian_sentiment"
 
 print("Loading model...")
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, cache_dir="/models")
+model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, cache_dir="/models")
 model.eval()
 print("Model loaded.")
 
