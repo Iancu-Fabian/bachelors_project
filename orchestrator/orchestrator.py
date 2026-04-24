@@ -17,7 +17,7 @@ def get_elb_hostname(service_name, namespace="default"):
         "kubectl", "get", "svc", service_name,
         "-n", namespace,
         "-o", "jsonpath={.status.loadBalancer.ingress[0].hostname}"
-    ])
+    ]) 
     return result.decode().strip()
 
 TARGET_URL = f"http://{get_elb_hostname('api-service')}"
