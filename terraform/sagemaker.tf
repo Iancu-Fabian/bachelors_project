@@ -4,9 +4,32 @@ resource "aws_sagemaker_model" "lstm_model" {
 
   primary_container {
     image          = "763104351884.dkr.ecr.${var.aws_region}.amazonaws.com/pytorch-inference:2.1.0-cpu-py310"
-    model_data_url = "s3://${aws_s3_bucket.model_bucket.bucket}/model/model.tar.gz"
+    model_data_url = "s3://lstm-model-905418239147-us-east-1-an/model.tar.gz"
     environment = {
       SAGEMAKER_PROGRAM = "inference.py"
     }
   }
+}
+
+resource "aws_sagemaker_endpoint_configuration" "lstm_serverless" {
+  name = "lstm-serverless-config"
+
+  production_variants {
+    variant_name  = "default"
+    model_name    = aws_sagemaker_model.lstm_model.name
+
+    serverless_config {
+      max_concurrency   = 5
+      memory_size_in_mb = 2048
+    }
+  }
+}
+
+resource "aws_sagemaker_endpoint" "lstm_endpoint" {
+  name                 = "lstm-autoscaler-endpoint"
+  endpoint_config_name = aws_sagemaker_endpoint_configuration.lstm_serverless.name
+}
+
+output "sagemaker_endpoint_name" {
+  value = aws_sagemaker_endpoint.lstm_endpoint.name
 }

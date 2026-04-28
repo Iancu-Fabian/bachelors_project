@@ -177,10 +177,10 @@ resource "aws_iam_role" "sagemaker_role" {
 
 resource "aws_iam_role_policy_attachment" "sagemaker_full" {
   role       = aws_iam_role.sagemaker_role.name
-  policy_arn = "arn:aws:iam::aws:policies/AmazonSageMakerFullAccess"
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSageMakerFullAccess"
 }
 
 resource "aws_iam_role_policy_attachment" "sagemaker_s3" {
   role       = aws_iam_role.sagemaker_role.name
-  policy_arn = "arn:aws:iam::aws:policies/AmazonS3FullAccess"
+  policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
 }
