@@ -12,6 +12,7 @@ from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
 from urllib.parse import urlencode
 from requests_aws4auth import AWS4Auth
+from datetime import timezone
 
 INTERVAL_SECONDS      = 30
 WINDOW_SIZE           = 30          
@@ -25,7 +26,6 @@ AWS_REGION            = os.getenv("AWS_REGION", "us-east-1")
 
 MIN_REPLICAS          = int(os.getenv("MIN_REPLICAS", "1"))
 MAX_REPLICAS          = int(os.getenv("MAX_REPLICAS", "10"))
-CPU_TARGET            = float(os.getenv("CPU_TARGET", "60.0"))  
 
 FEATURE_COLS          = ['request_rate', 'cpu_usage', 'latency_p95', 'replica_count']
 
@@ -37,7 +37,7 @@ log = logging.getLogger(__name__)
 
 QUERIES = {
     "request_rate":        f'sum(rate(http_requests_total{{handler="/predict"}}[1m])) OR on() vector(0)',
-    "cpu_usage":           f'sum(rate(container_cpu_usage_seconds_total{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}.*", container="api"}}[1m]))',
+    "cpu_usage":           f'sum(rate(container_cpu_usage_seconds_total{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}-.*", container=~".*api.*"}}[1m])) OR on() vector(0)',
     "latency_p95": (
                             f'histogram_quantile(0.95, sum(rate(http_request_duration_highr_seconds_bucket[1m])) by (le)) '
                             f'* on() (sum(rate(http_requests_total{{handler="/predict"}}[1m])) > bool 0) '
@@ -56,20 +56,25 @@ aws_auth = AWS4Auth(
 )
 AMP_QUERY_URL = f"https://aps-workspaces.{AWS_REGION}.amazonaws.com/workspaces/{AMP_WORKSPACE_ID}/api/v1/query_range"
 
+def step_to_seconds(step: str) -> int:
+    units = {"s": 1, "m": 60, "h": 3600}
+    return int(step[:-1]) * units[step[-1]]
+
+
 def query_amp_range(metric_name: str, end_time: datetime) -> list[float]:
-    """Interoghează AMP folosind requests-aws4auth pentru a evita erorile de SigV4."""
-    start_time = end_time - timedelta(seconds=WINDOW_SIZE * int(STEP[:-1]))
+    """Interoghează AMP folosind POST și requests-aws4auth pentru a evita erorile de SigV4."""
+    start_time = end_time - timedelta(seconds=WINDOW_SIZE * step_to_seconds(STEP))
     query = QUERIES[metric_name]
 
-    params = {
+    payload = {
         "query": query,
-        "start": start_time.isoformat() + "Z",
-        "end": end_time.isoformat() + "Z",
-        "step": STEP,
+        "start": str(start_time.timestamp()),
+        "end":   str(end_time.timestamp()),
+        "step":  STEP,
     }
-    
+
     try:
-        response = requests.get(AMP_QUERY_URL, params=params, auth=aws_auth)
+        response = requests.post(AMP_QUERY_URL, data=payload, auth=aws_auth)
         response.raise_for_status()
     except Exception as e:
         log.error(f"Eroare HTTP la interogarea AMP pentru {metric_name}: {e}")
@@ -79,45 +84,53 @@ def query_amp_range(metric_name: str, end_time: datetime) -> list[float]:
 
     data = response.json()
     results = data.get("data", {}).get("result", [])
-    
+
     if not results:
         log.warning(f"Niciun rezultat din AMP pentru metrica: {metric_name}")
         return []
 
-    # Extract the float values
     values = [float(v[1]) for v in results[0]["values"]]
-
-    # --- NEW DEBUG LOGGING ---
-    # We round to 4 decimal places just for the print statement so it's readable
-    readable_values = [round(v, 4) for v in values]
-    log.info(f"➔ Metrica: {metric_name} | Puncte primite: {len(values)}")
-    log.info(f"   Valori: {readable_values}")
-    # -------------------------
 
     if len(values) < WINDOW_SIZE:
         log.warning(f"Date insuficiente pentru {metric_name}: {len(values)}/{WINDOW_SIZE} puncte")
         return []
+
+    if all(v == 0.0 for v in values):
+        log.warning(f"Fereastra complet zero pentru {metric_name}, posibil date lipsă — sar peste ciclu")
+        return []
+
+    readable_values = [round(v, 4) for v in values]
+    log.info(f"➔ Metrica: {metric_name} | Puncte primite: {len(values)}")
+    log.info(f"   Valori: {readable_values}")
 
     return values[-WINDOW_SIZE:]
 
 def build_input_window(end_time: datetime) -> np.ndarray | None:
     """
     Construiește fereastra de input pentru model.
+    Afișează loguri pentru TOATE metricele înainte să se oprească dacă lipsesc date.
     Shape: (1, WINDOW_SIZE, len(FEATURE_COLS))
     """
     window = []
+    missing_data = False
+    
     for feature in FEATURE_COLS:
         values = query_amp_range(feature, end_time)
         if not values:
-            return None
-        window.append(values)
+            missing_data = True
+        else:
+            window.append(values)
+
+    if missing_data or len(window) != len(FEATURE_COLS):
+        log.warning("Una sau mai multe metrice nu au returnat date valide. Anulez construirea ferestrei.")
+        return None
 
     arr = np.array(window).T
     return arr.reshape(1, WINDOW_SIZE, len(FEATURE_COLS))
 
 
 def call_sagemaker(input_window: np.ndarray) -> float | None:
-    """Trimite fereastra către SageMaker și returnează predicția de CPU usage."""
+    """Trimite fereastra către SageMaker și returnează numărul brut de replici prezis."""
     payload = json.dumps({"inputs": input_window.tolist()})
 
     try:
@@ -139,15 +152,18 @@ def call_sagemaker(input_window: np.ndarray) -> float | None:
         return None
 
 
-def compute_desired_replicas(predicted_cpu: float, current_replicas: int) -> int:
+def compute_desired_replicas(predicted_replicas_raw: float) -> int:
     """
-    Calculează numărul de replici necesar pe baza predicției de CPU.
-    Folosește aceeași formulă ca HPA, aplicată pe valoarea prezisă.
+    Transformă predicția brută a modelului într-un număr întreg valid de replici,
+    respectând limitele MIN și MAX setate.
     """
-    if predicted_cpu <= 0:
+    if predicted_replicas_raw <= 0:
         return MIN_REPLICAS
 
-    desired = int(np.ceil(current_replicas * (predicted_cpu / CPU_TARGET)))
+    # Rotunjim la cel mai apropiat întreg (ex: 3.6 devine 4)
+    desired = int(round(predicted_replicas_raw))
+    
+    # Aplicăm limitele
     desired = max(MIN_REPLICAS, min(MAX_REPLICAS, desired))
     return desired
 
@@ -182,15 +198,15 @@ def reconcile(apps_v1: client.AppsV1Api) -> None:
         log.warning("Date insuficiente, sar peste acest ciclu.")
         return
 
-    predicted_cpu = call_sagemaker(input_window)
-    if predicted_cpu is None:
+    predicted_replicas_raw = call_sagemaker(input_window)
+    if predicted_replicas_raw is None:
         log.warning("Predicție indisponibilă, sar peste acest ciclu.")
         return
 
-    log.info(f"CPU usage prezis: {predicted_cpu:.2f}%")
+    log.info(f"Replici prezise de model (raw): {predicted_replicas_raw:.2f}")
 
     current_replicas = get_current_replicas(apps_v1)
-    desired_replicas = compute_desired_replicas(predicted_cpu, current_replicas)
+    desired_replicas = compute_desired_replicas(predicted_replicas_raw)
 
     log.info(f"Replici curente: {current_replicas} → dorite: {desired_replicas}")
 
@@ -204,6 +220,7 @@ def main():
     log.info("Controller predictiv pornit.")
     log.info(f"Deployment: {DEPLOYMENT_NAME} | Namespace: {NAMESPACE}")
     log.info(f"Window size: {WINDOW_SIZE} | Interval: {INTERVAL_SECONDS}s")
+    log.info(f"Limiti replici: MIN={MIN_REPLICAS} / MAX={MAX_REPLICAS}")
 
     try:
         config.load_incluster_config()
