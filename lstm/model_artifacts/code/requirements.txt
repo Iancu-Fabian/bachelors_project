@@ -1,7 +1,3 @@
-torch
-numpy
-json
-os
 matplotlib
 scikit-learn
 pandas
