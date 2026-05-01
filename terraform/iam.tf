@@ -2,6 +2,8 @@ locals {
   oidc_issuer_url = module.eks.cluster_oidc_issuer_url
 }
 
+data "aws_caller_identity" "current" {}
+
 #eks
 
 resource "aws_iam_role" "eks_admin" {
@@ -39,7 +41,6 @@ resource "aws_eks_access_policy_association" "admin" {
     type = "cluster"
   }
 }
-
 
 #prometheus
 
@@ -105,7 +106,6 @@ resource "kubernetes_service_account_v1" "prometheus" {
   }
 }
 
-
 #grafana
 
 data "aws_iam_policy_document" "grafana_assume" {
@@ -162,6 +162,8 @@ resource "aws_grafana_role_association" "admin" {
   ]
 }
 
+#sagemaker
+
 resource "aws_iam_role" "sagemaker_role" {
   name = "sagemaker-lstm-role"
 
@@ -183,4 +185,55 @@ resource "aws_iam_role_policy_attachment" "sagemaker_full" {
 resource "aws_iam_role_policy_attachment" "sagemaker_s3" {
   role       = aws_iam_role.sagemaker_role.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+}
+
+#predictive_controller
+
+resource "aws_iam_role" "predictive_controller_irsa" {
+  name = "predictive-controller-irsa"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Federated = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${module.eks.oidc_provider}"
+
+      }
+      Action = "sts:AssumeRoleWithWebIdentity"
+      Condition = {
+        StringEquals = {
+          "${module.eks.oidc_provider}:sub" = "system:serviceaccount:default:predictive-controller-sa"
+        }
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "predictive_controller_irsa" {
+  name = "predictive-controller-policy"
+  role = aws_iam_role.predictive_controller_irsa.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "aps:QueryMetrics",
+          "aps:GetMetricMetadata",
+          "aps:GetSeries",
+          "aps:GetLabels"
+        ]
+        Resource = aws_prometheus_workspace.this.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "sagemaker:InvokeEndpoint"
+        ]
+        Resource = aws_sagemaker_endpoint.lstm_endpoint.arn
+      }
+    ]
+  })
 }
