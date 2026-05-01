@@ -1,11 +1,17 @@
 import os
 import time
 import json
+import requests
 import logging
 import numpy as np
 import boto3
 from datetime import datetime, timedelta
 from kubernetes import client, config
+from botocore.session import Session
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+from urllib.parse import urlencode
+from requests_aws4auth import AWS4Auth
 
 INTERVAL_SECONDS      = 30
 WINDOW_SIZE           = 30          
@@ -30,43 +36,69 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 QUERIES = {
-    "request_rate": 'sum(rate(http_requests_total{namespace="' + NAMESPACE + '"}[1m]))',
-    "cpu_usage":    'avg(rate(container_cpu_usage_seconds_total{namespace="' + NAMESPACE + '", container="sentiment-api"}[1m])) * 100',
-    "latency_p95":  'histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{namespace="' + NAMESPACE + '"}[1m])) by (le)) * 1000',
-    "replica_count": 'kube_deployment_status_replicas_ready{namespace="' + NAMESPACE + '", deployment="' + DEPLOYMENT_NAME + '"}',
+    "request_rate":        f'sum(rate(http_requests_total{{handler="/predict"}}[1m])) OR on() vector(0)',
+    "cpu_usage":           f'sum(rate(container_cpu_usage_seconds_total{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}.*", container="api"}}[1m]))',
+    "latency_p95": (
+                            f'histogram_quantile(0.95, sum(rate(http_request_duration_highr_seconds_bucket[1m])) by (le)) '
+                            f'* on() (sum(rate(http_requests_total{{handler="/predict"}}[1m])) > bool 0) '
+                            f'OR on() vector(0)'
+    ), 
+    "replica_count":       f'kube_deployment_status_replicas_available{{namespace="{NAMESPACE}", deployment="{DEPLOYMENT_NAME}"}} OR on() vector(0)'
 }
 
-# ── Clienți AWS ───────────────────────────────────────────────────────────────
-amp_client       = boto3.client("amp", region_name=AWS_REGION)
 sagemaker_client = boto3.client("sagemaker-runtime", region_name=AWS_REGION)
-
+aws_session = Session()
+aws_credentials = aws_session.get_credentials()
+aws_auth = AWS4Auth(
+    refreshable_credentials=aws_credentials,
+    region=AWS_REGION,
+    service='aps'
+)
+AMP_QUERY_URL = f"https://aps-workspaces.{AWS_REGION}.amazonaws.com/workspaces/{AMP_WORKSPACE_ID}/api/v1/query_range"
 
 def query_amp_range(metric_name: str, end_time: datetime) -> list[float]:
-    """Interoghează AMP pentru ultimele WINDOW_SIZE puncte ale unei metrici."""
+    """Interoghează AMP folosind requests-aws4auth pentru a evita erorile de SigV4."""
     start_time = end_time - timedelta(seconds=WINDOW_SIZE * int(STEP[:-1]))
-    query      = QUERIES[metric_name]
+    query = QUERIES[metric_name]
 
-    response = amp_client.query_range(
-        workspaceId=AMP_WORKSPACE_ID,
-        query=query,
-        startTime=start_time.isoformat() + "Z",
-        endTime=end_time.isoformat() + "Z",
-        step=STEP,
-    )
+    params = {
+        "query": query,
+        "start": start_time.isoformat() + "Z",
+        "end": end_time.isoformat() + "Z",
+        "step": STEP,
+    }
+    
+    try:
+        response = requests.get(AMP_QUERY_URL, params=params, auth=aws_auth)
+        response.raise_for_status()
+    except Exception as e:
+        log.error(f"Eroare HTTP la interogarea AMP pentru {metric_name}: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            log.error(f"Detalii eroare: {e.response.text}")
+        return []
 
-    results = response.get("data", {}).get("result", [])
+    data = response.json()
+    results = data.get("data", {}).get("result", [])
+    
     if not results:
         log.warning(f"Niciun rezultat din AMP pentru metrica: {metric_name}")
         return []
 
+    # Extract the float values
     values = [float(v[1]) for v in results[0]["values"]]
+
+    # --- NEW DEBUG LOGGING ---
+    # We round to 4 decimal places just for the print statement so it's readable
+    readable_values = [round(v, 4) for v in values]
+    log.info(f"➔ Metrica: {metric_name} | Puncte primite: {len(values)}")
+    log.info(f"   Valori: {readable_values}")
+    # -------------------------
 
     if len(values) < WINDOW_SIZE:
         log.warning(f"Date insuficiente pentru {metric_name}: {len(values)}/{WINDOW_SIZE} puncte")
         return []
 
     return values[-WINDOW_SIZE:]
-
 
 def build_input_window(end_time: datetime) -> np.ndarray | None:
     """

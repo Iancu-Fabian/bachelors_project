@@ -1,0 +1,5 @@
+kubernetes
+boto3
+numpy
+requests 
+requests-aws4auth
