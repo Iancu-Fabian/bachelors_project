@@ -57,7 +57,7 @@ resource "kubernetes_deployment_v1" "predictive_controller" {
           }
           env {
             name  = "CPU_TARGET"
-            value = "60.0"
+            value = "65.0"
           }
         }
       }
