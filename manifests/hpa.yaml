@@ -7,7 +7,7 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: api-deployment
-  minReplicas: 2
+  minReplicas: 1
   maxReplicas: 10
   metrics:
   - type: Resource
@@ -24,8 +24,8 @@ spec:
         value: 100
         periodSeconds: 30
     scaleDown:
-      stabilizationWindowSeconds: 180
+      stabilizationWindowSeconds: 60
       policies:
       - type: Percent
         value: 50
-        periodSeconds: 60
+        periodSeconds: 30
