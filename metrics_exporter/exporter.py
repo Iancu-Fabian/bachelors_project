@@ -6,17 +6,15 @@ from requests_aws4auth import AWS4Auth
 import os
 
 CSV_PATH = "dataset/training_dataset.csv"
+SESSION_ID = os.getenv("SESSION_ID", "0")
 
 def get_amp_endpoint(region: str, alias: str = "licenta-amp") -> str:
     client = boto3.client("amp", region_name=region)
     workspaces = client.list_workspaces(alias=alias)["workspaces"]
-    
     if not workspaces:
         raise RuntimeError(f"No AMP workspace found with alias '{alias}'")
-    
     workspace = workspaces[0]
     return f"https://aps-workspaces.{region}.amazonaws.com/workspaces/{workspace['workspaceId']}"
-
 
 REGION = "us-east-1"
 AMP_ENDPOINT = get_amp_endpoint(REGION)
@@ -33,18 +31,16 @@ awsauth = AWS4Auth(
     session_token=credentials.token
 )
 
+# Eliminat: memory_usage, cpu_throttling_ratio, error_rate
 QUERIES = {
-    "request_rate":        f'sum(rate(http_requests_total{{handler="/predict"}}[1m])) OR on() vector(0)',
-    "cpu_usage":           f'sum(rate(container_cpu_usage_seconds_total{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}.*", container="api"}}[1m]))',
-    "memory_usage":        f'sum(container_memory_working_set_bytes{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}.*", container="api"}})',
-    "cpu_throttling_ratio":f'(sum(rate(container_cpu_cfs_throttled_seconds_total{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}.*", container="api"}}[1m])) / sum(rate(container_cpu_usage_seconds_total{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}.*", container="api"}}[1m]))) OR on() vector(0)',
+    "request_rate": f'sum(rate(http_requests_total{{handler="/predict"}}[1m])) OR on() vector(0)',
+    "cpu_usage":    f'sum(rate(container_cpu_usage_seconds_total{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}.*", container="api"}}[1m]))',
     "latency_p95": (
-                            f'histogram_quantile(0.95, sum(rate(http_request_duration_highr_seconds_bucket[1m])) by (le)) '
-                            f'* on() (sum(rate(http_requests_total{{handler="/predict"}}[1m])) > bool 0) '
-                            f'OR on() vector(0)'
-    ), 
-    "error_rate":          f'sum(rate(http_requests_total{{handler="/predict", status="5xx"}}[1m])) OR on() vector(0)',
-    "replica_count":       f'kube_deployment_status_replicas_available{{namespace="{NAMESPACE}", deployment="{DEPLOYMENT_NAME}"}} OR on() vector(0)'
+                    f'histogram_quantile(0.95, sum(rate(http_request_duration_highr_seconds_bucket[1m])) by (le)) '
+                    f'* on() (sum(rate(http_requests_total{{handler="/predict"}}[1m])) > bool 0) '
+                    f'OR on() vector(0)'
+    ),
+    "replica_count": f'kube_deployment_status_replicas_available{{namespace="{NAMESPACE}", deployment="{DEPLOYMENT_NAME}"}} OR on() vector(0)'
 }
 
 def query_range(query, start, end, step="30s"):
@@ -61,10 +57,8 @@ def query_range(query, start, end, step="30s"):
         print(f"Error querying Prometheus: {e}")
         return None
 
-
 end_time = datetime.datetime.now(datetime.UTC)
 start_time = end_time - datetime.timedelta(minutes=5)
-
 start = start_time.timestamp()
 end = end_time.timestamp()
 
@@ -89,6 +83,9 @@ if dfs:
     if "replica_count" in final_df.columns:
         final_df["replica_count"] = final_df["replica_count"].replace(0, pd.NA).ffill().fillna(0)
 
+    # Adaugă session_id
+    final_df["session_id"] = SESSION_ID
+
     os.makedirs("dataset", exist_ok=True)
 
     if os.path.exists(CSV_PATH) and os.path.getsize(CSV_PATH) > 0:
@@ -97,6 +94,6 @@ if dfs:
         final_df = final_df[~final_df.index.duplicated(keep='last')]
 
     final_df.to_csv(CSV_PATH)
-    print(f"Dataset saved with {len(final_df)} total rows.")
+    print(f"Dataset saved with {len(final_df)} total rows. Session: {SESSION_ID}")
 else:
     print("No data collected at all. Check your AMP permissions or pod labels.")
