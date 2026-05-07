@@ -2,6 +2,8 @@ FROM python:3.10-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV OMP_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
 
 WORKDIR /app
 
@@ -26,4 +28,10 @@ COPY sentiment_analysis_api.py .
 
 EXPOSE 8000
 
-CMD ["uvicorn", "sentiment_analysis_api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["gunicorn", "sentiment_analysis_api:app", \
+     "--workers", "1", \
+     "--worker-class", "uvicorn.workers.UvicornWorker", \
+     "--bind", "0.0.0.0:8000", \
+     "--timeout", "120", \
+     "--graceful-timeout", "30", \
+     "--backlog", "50"]
