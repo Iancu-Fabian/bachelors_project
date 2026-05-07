@@ -24,7 +24,12 @@ module "eks" {
       desired_size   = var.desired_nodes
       min_size       = 1
       max_size       = 6
+      
+      iam_role_additional_policies = {
+      ssm = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
     }
+    }
+    
   }
 }
 
