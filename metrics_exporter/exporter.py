@@ -5,8 +5,17 @@ import datetime
 from requests_aws4auth import AWS4Auth
 import os
 
-CSV_PATH = "dataset/training_dataset.csv"
+MODE = os.getenv("MODE", "training")
 SESSION_ID = os.getenv("SESSION_ID", "0")
+
+if MODE == "training":
+    CSV_PATH = "dataset/training_dataset.csv"
+elif MODE == "hpa_eval":
+    CSV_PATH = "dataset/evaluation_hpa.csv"
+elif MODE == "lstm_eval":
+    CSV_PATH = "dataset/evaluation_lstm.csv"
+else:
+    CSV_PATH = f"dataset/dataset_{MODE}.csv"
 
 def get_amp_endpoint(region: str, alias: str = "licenta-amp") -> str:
     client = boto3.client("amp", region_name=region)
@@ -31,15 +40,11 @@ awsauth = AWS4Auth(
     session_token=credentials.token
 )
 
-# Eliminat: memory_usage, cpu_throttling_ratio, error_rate
 QUERIES = {
     "request_rate": f'sum(rate(http_requests_total{{handler="/predict"}}[1m])) OR on() vector(0)',
-    "cpu_usage":    f'sum(rate(container_cpu_usage_seconds_total{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}.*", container="api"}}[1m]))',
-    "latency_p95": (
-                    f'histogram_quantile(0.95, sum(rate(http_request_duration_highr_seconds_bucket[1m])) by (le)) '
-                    f'* on() (sum(rate(http_requests_total{{handler="/predict"}}[1m])) > bool 0) '
-                    f'OR on() vector(0)'
-    ),
+    "cpu_usage": f'sum(rate(container_cpu_usage_seconds_total{{namespace="{NAMESPACE}", pod=~"{DEPLOYMENT_NAME}.*", container="api"}}[1m]))',
+    "latency_p95": f'histogram_quantile(0.95, sum(rate(http_request_duration_highr_seconds_bucket[1m])) by (le)) * on() (sum(rate(http_requests_total{{handler="/predict"}}[1m])) > bool 0) OR on() vector(0)',
+    "error_rate": f'(sum(rate(http_requests_total{{handler="/predict", status=~"5.."}}[1m])) / sum(rate(http_requests_total{{handler="/predict"}}[1m]))) OR on() vector(0)',
     "replica_count": f'kube_deployment_status_replicas_available{{namespace="{NAMESPACE}", deployment="{DEPLOYMENT_NAME}"}} OR on() vector(0)'
 }
 
@@ -65,7 +70,6 @@ end = end_time.timestamp()
 dfs = []
 
 for name, query in QUERIES.items():
-    print(f"Collecting {name}...")
     data = query_range(query, start, end)
 
     if data and data.get("data") and data["data"]["result"]:
@@ -74,8 +78,6 @@ for name, query in QUERIES.items():
         temp_df["timestamp"] = temp_df["timestamp"].astype(float)
         temp_df[name] = temp_df[name].astype(float)
         dfs.append(temp_df.set_index("timestamp"))
-    else:
-        print(f"Warning: No data found for {name}. Filling with 0.")
 
 if dfs:
     final_df = pd.concat(dfs, axis=1).sort_index().interpolate().fillna(0)
@@ -83,7 +85,6 @@ if dfs:
     if "replica_count" in final_df.columns:
         final_df["replica_count"] = final_df["replica_count"].replace(0, pd.NA).ffill().fillna(0)
 
-    # Adaugă session_id
     final_df["session_id"] = SESSION_ID
 
     os.makedirs("dataset", exist_ok=True)
@@ -94,6 +95,6 @@ if dfs:
         final_df = final_df[~final_df.index.duplicated(keep='last')]
 
     final_df.to_csv(CSV_PATH)
-    print(f"Dataset saved with {len(final_df)} total rows. Session: {SESSION_ID}")
+    print(f"Dataset saved with {len(final_df)} total rows to {CSV_PATH}. Session: {SESSION_ID}")
 else:
-    print("No data collected at all. Check your AMP permissions or pod labels.")
+    print("No data collected at all.")
