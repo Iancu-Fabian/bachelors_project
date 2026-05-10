@@ -1,5 +1,5 @@
 resource "aws_sagemaker_model" "lstm_model" {
-  name               = "lstm-autoscaler-model"
+  name               = "lstm-autoscaler-model-v3"
   execution_role_arn = aws_iam_role.sagemaker_role.arn
 
   primary_container {
@@ -12,7 +12,7 @@ resource "aws_sagemaker_model" "lstm_model" {
 }
 
 resource "aws_sagemaker_endpoint_configuration" "lstm_serverless" {
-  name = "lstm-serverless-config"
+  name = "lstm-serverless-config-v3"
 
   production_variants {
     variant_name  = "default"
@@ -23,11 +23,20 @@ resource "aws_sagemaker_endpoint_configuration" "lstm_serverless" {
       memory_size_in_mb = 2048
     }
   }
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_sagemaker_endpoint" "lstm_endpoint" {
   name                 = "lstm-autoscaler-endpoint"
   endpoint_config_name = aws_sagemaker_endpoint_configuration.lstm_serverless.name
+
+  depends_on = [aws_sagemaker_endpoint_configuration.lstm_serverless]
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 output "sagemaker_endpoint_name" {

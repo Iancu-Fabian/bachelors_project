@@ -53,7 +53,7 @@ resource "kubernetes_deployment_v1" "predictive_controller" {
           }
           env {
             name  = "MAX_REPLICAS"
-            value = "10"
+            value = "8"
           }
           env {
             name  = "CPU_TARGET"
