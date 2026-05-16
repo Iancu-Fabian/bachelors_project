@@ -41,10 +41,6 @@ resource "kubernetes_deployment_v1" "rf_controller" {
             value = "default"
           }
           env {
-            name  = "AMP_WORKSPACE_ID"
-            value = aws_prometheus_workspace.this.id
-          }
-          env {
             name  = "AWS_REGION"
             value = var.aws_region
           }

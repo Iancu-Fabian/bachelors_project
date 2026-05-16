@@ -28,10 +28,6 @@ resource "kubernetes_deployment_v1" "predictive_controller" {
           image = "fabian1207/predictive_controller:latest"
 
           env {
-            name  = "AMP_WORKSPACE_ID"
-            value = aws_prometheus_workspace.this.id
-          }
-          env {
             name  = "DEPLOYMENT_NAME"
             value = "api-deployment"
           }
