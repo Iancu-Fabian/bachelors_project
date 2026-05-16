@@ -1,6 +1,6 @@
-locals {
-  amp_remote_write_endpoint = "${aws_prometheus_workspace.this.prometheus_endpoint}api/v1/remote_write"
-}
+# locals {
+#   amp_remote_write_endpoint = "${aws_prometheus_workspace.this.prometheus_endpoint}api/v1/remote_write"
+# }
 
 
 #namespace
@@ -14,13 +14,13 @@ resource "kubernetes_namespace_v1" "monitoring" {
   ]
 }
 
-resource "aws_prometheus_workspace" "this" {
-  alias = var.amp_workspace_alias
+# resource "aws_prometheus_workspace" "this" {
+#   alias = var.amp_workspace_alias
 
-  tags = {
-    Project = var.project_name
-  }
-}
+#   tags = {
+#     Project = var.project_name
+#   }
+# }
 
 resource "helm_release" "prometheus" {
   name       = "kube-prometheus-stack"
@@ -40,24 +40,22 @@ resource "helm_release" "prometheus" {
         prometheusSpec = {
           enableAdminAPI = false
           scrapeInterval = "30s"
-          retention   = "0s"
-          storageSpec = {}
+          retention      = "7d"   # keep 7 days — enough for your sessions
 
-          walCompression = false
-          mode           = "agent"
-
-          remoteWrite = [
-            {
-              url = "${aws_prometheus_workspace.this.prometheus_endpoint}api/v1/remote_write"
-              sigv4 = {
-                region = var.aws_region
+          storageSpec = {
+            volumeClaimTemplate = {
+              spec = {
+                accessModes = ["ReadWriteOnce"]
+                resources = {
+                  requests = {
+                    storage = "10Gi"   # plenty for short load test sessions
+                  }
+                }
               }
             }
-          ]
+          }
         }
       }
-
-
 
       grafana = {
         enabled = false

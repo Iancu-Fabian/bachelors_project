@@ -44,123 +44,120 @@ resource "aws_eks_access_policy_association" "admin" {
 
 #prometheus
 
-data "aws_iam_policy_document" "amp_write" {
-  statement {
-    effect = "Allow"
+# data "aws_iam_policy_document" "amp_write" {
+#   statement {
+#     effect = "Allow"
 
-    actions = [
-      "aps:RemoteWrite",
-      "aps:GetSeries",
-      "aps:GetLabels",
-      "aps:GetMetricMetadata"
-    ]
+#     actions = [
+#       "aps:RemoteWrite",
+#       "aps:GetSeries",
+#       "aps:GetLabels",
+#       "aps:GetMetricMetadata"
+#     ]
 
-    resources = [
-      aws_prometheus_workspace.this.arn
-    ]
-  }
-}
+#     resources = [
+#       aws_prometheus_workspace.this.arn
+#     ]
+#   }
+# }
 
-data "aws_iam_policy_document" "prometheus_assume_role" {
-  statement {
-    effect = "Allow"
+# data "aws_iam_policy_document" "prometheus_assume_role" {
+#   statement {
+#     effect = "Allow"
 
-    principals {
-      type        = "Federated"
-      identifiers = [module.eks.oidc_provider_arn]
-    }
+#     principals {
+#       type        = "Federated"
+#       identifiers = [module.eks.oidc_provider_arn]
+#     }
 
-    actions = ["sts:AssumeRoleWithWebIdentity"]
+#     actions = ["sts:AssumeRoleWithWebIdentity"]
 
-    condition {
-      test     = "StringEquals"
-      variable = "${replace(module.eks.cluster_oidc_issuer_url, "https://", "")}:sub"
-      values   = ["system:serviceaccount:${var.prometheus_namespace}:${var.prometheus_service_account_name}"]
-    }
-  }
-}
+#     condition {
+#       test     = "StringEquals"
+#       variable = "${replace(module.eks.cluster_oidc_issuer_url, "https://", "")}:sub"
+#       values   = ["system:serviceaccount:${var.prometheus_namespace}:${var.prometheus_service_account_name}"]
+#     }
+#   }
+# }
 
-resource "aws_iam_role" "prometheus" {
-  name               = "${var.project_name}-amp-prometheus-role"
-  assume_role_policy = data.aws_iam_policy_document.prometheus_assume_role.json
-}
+# resource "aws_iam_role" "prometheus" {
+#   name               = "${var.project_name}-amp-prometheus-role"
+#   assume_role_policy = data.aws_iam_policy_document.prometheus_assume_role.json
+# }
 
-resource "aws_iam_policy" "amp_write" {
-  name   = "${var.project_name}-amp-write-policy"
-  policy = data.aws_iam_policy_document.amp_write.json
-}
+# resource "aws_iam_policy" "amp_write" {
+#   name   = "${var.project_name}-amp-write-policy"
+#   policy = data.aws_iam_policy_document.amp_write.json
+# }
 
-resource "aws_iam_role_policy_attachment" "amp_write" {
-  role       = aws_iam_role.prometheus.name
-  policy_arn = aws_iam_policy.amp_write.arn
-}
+# resource "aws_iam_role_policy_attachment" "amp_write" {
+#   role       = aws_iam_role.prometheus.name
+#   policy_arn = aws_iam_policy.amp_write.arn
+# }
 
 resource "kubernetes_service_account_v1" "prometheus" {
   metadata {
     name      = var.prometheus_service_account_name
     namespace = kubernetes_namespace_v1.monitoring.metadata[0].name
 
-    annotations = {
-      "eks.amazonaws.com/role-arn" = aws_iam_role.prometheus.arn
-    }
   }
 }
 
 #grafana
 
-data "aws_iam_policy_document" "grafana_assume" {
-  statement {
-    effect = "Allow"
+# data "aws_iam_policy_document" "grafana_assume" {
+#   statement {
+#     effect = "Allow"
 
-    principals {
-      type        = "Service"
-      identifiers = ["grafana.amazonaws.com"]
-    }
+#     principals {
+#       type        = "Service"
+#       identifiers = ["grafana.amazonaws.com"]
+#     }
 
-    actions = ["sts:AssumeRole"]
-  }
-}
+#     actions = ["sts:AssumeRole"]
+#   }
+# }
 
-resource "aws_iam_role" "grafana" {
-  name               = "${var.project_name}-grafana-role"
-  assume_role_policy = data.aws_iam_policy_document.grafana_assume.json
-}
+# resource "aws_iam_role" "grafana" {
+#   name               = "${var.project_name}-grafana-role"
+#   assume_role_policy = data.aws_iam_policy_document.grafana_assume.json
+# }
 
-data "aws_iam_policy_document" "grafana_amp" {
-  statement {
-    effect = "Allow"
+# data "aws_iam_policy_document" "grafana_amp" {
+#   statement {
+#     effect = "Allow"
 
-    actions = [
-      "aps:QueryMetrics",
-      "aps:GetLabels",
-      "aps:GetSeries",
-      "aps:GetMetricMetadata"
-    ]
+#     actions = [
+#       "aps:QueryMetrics",
+#       "aps:GetLabels",
+#       "aps:GetSeries",
+#       "aps:GetMetricMetadata"
+#     ]
 
-    resources = [
-      aws_prometheus_workspace.this.arn
-    ]
-  }
-}
+#     resources = [
+#       aws_prometheus_workspace.this.arn
+#     ]
+#   }
+# }
 
-resource "aws_iam_policy" "grafana_amp" {
-  name   = "${var.project_name}-grafana-amp"
-  policy = data.aws_iam_policy_document.grafana_amp.json
-}
+# resource "aws_iam_policy" "grafana_amp" {
+#   name   = "${var.project_name}-grafana-amp"
+#   policy = data.aws_iam_policy_document.grafana_amp.json
+# }
 
-resource "aws_iam_role_policy_attachment" "grafana_attach" {
-  role       = aws_iam_role.grafana.name
-  policy_arn = aws_iam_policy.grafana_amp.arn
-}
+# resource "aws_iam_role_policy_attachment" "grafana_attach" {
+#   role       = aws_iam_role.grafana.name
+#   policy_arn = aws_iam_policy.grafana_amp.arn
+# }
 
-resource "aws_grafana_role_association" "admin" {
-  workspace_id = aws_grafana_workspace.this.id
-  role         = "ADMIN"
+# resource "aws_grafana_role_association" "admin" {
+#   workspace_id = aws_grafana_workspace.this.id
+#   role         = "ADMIN"
 
-  user_ids = [
-    var.grafana_admin_user_id
-  ]
-}
+#   user_ids = [
+#     var.grafana_admin_user_id
+#   ]
+# }
 
 #sagemaker
 
@@ -217,22 +214,25 @@ resource "aws_iam_role_policy" "predictive_controller_irsa" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "aps:QueryMetrics",
-          "aps:GetMetricMetadata",
-          "aps:GetSeries",
-          "aps:GetLabels"
-        ]
-        Resource = aws_prometheus_workspace.this.arn
-      },
+      # {
+      #   Effect = "Allow"
+      #   Action = [
+      #     "aps:QueryMetrics",
+      #     "aps:GetMetricMetadata",
+      #     "aps:GetSeries",
+      #     "aps:GetLabels"
+      #   ]
+      #   Resource = aws_prometheus_workspace.this.arn
+      # },
       {
         Effect = "Allow"
         Action = [
           "sagemaker:InvokeEndpoint"
         ]
-        Resource = aws_sagemaker_endpoint.lstm_endpoint.arn
+        Resource = [
+        aws_sagemaker_endpoint.lstm_endpoint.arn,
+        aws_sagemaker_endpoint.rf_endpoint.arn
+        ]
       }
     ]
   })
